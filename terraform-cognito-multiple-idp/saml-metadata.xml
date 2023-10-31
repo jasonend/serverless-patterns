@@ -1,0 +1,55 @@
+<EntityDescriptor entityID="https://sso.example.org/idp" validUntil="2017-08-30T19:10:29Z" xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:mdrpi="urn:oasis:names:tc:SAML:metadata:rpi" xmlns:mdattr="urn:oasis:names:tc:SAML:metadata:attribute" xmlns:mdui="urn:oasis:names:tc:SAML:metadata:ui" xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+	<!-- insert ds:Signature element (omitted) -->
+	<Extensions>
+		<RegistrationInfo registrationAuthority="https://registrar.example.net" />
+		<PublicationInfo creationInstant="2017-08-16T19:10:29Z" publisher="https://registrar.example.net" />
+		<EntityAttributes>
+			<Attribute Name="http://registrar.example.net/entity-category" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri">
+				<AttributeValue>
+					https://registrar.example.net/category/self-certified
+				</AttributeValue>
+			</Attribute>
+		</EntityAttributes>
+	</Extensions>
+	<IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+		<Extensions>
+			<UIInfo>
+				<DisplayName xml:lang="en">
+					Example.org
+				</DisplayName>
+				<Description xml:lang="en">
+					The identity provider at Example.org
+				</Description>
+				<Logo height="32" width="32" xml:lang="en">
+					https://idp.example.org/myicon.png
+				</Logo>
+			</UIInfo>
+		</Extensions>
+		<KeyDescriptor use="signing">
+			<KeyInfo>
+				...
+			</KeyInfo>
+		</KeyDescriptor>
+		<SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.org/SAML2/SSO/Redirect" />
+		<SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://idp.example.org/SAML2/SSO/POST" />
+	</IDPSSODescriptor>
+	<Organization>
+		<OrganizationName xml:lang="en">
+			Example.org Non-Profit Org
+		</OrganizationName>
+		<OrganizationDisplayName xml:lang="en">
+			Example.org
+		</OrganizationDisplayName>
+		<OrganizationURL xml:lang="en">
+			https://www.example.org/
+		</OrganizationURL>
+	</Organization>
+	<ContactPerson contactType="technical">
+		<SurName>
+			SAML Technical Support
+		</SurName>
+		<EmailAddress>
+			mailto:technical-support@example.org
+		</EmailAddress>
+	</ContactPerson>
+</EntityDescriptor>
