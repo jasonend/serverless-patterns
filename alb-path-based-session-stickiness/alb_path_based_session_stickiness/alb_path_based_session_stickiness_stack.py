@@ -12,9 +12,11 @@ from aws_cdk import (
     aws_route53 as r53,
     aws_s3 as s3,
     aws_autoscaling as autoscaling,
+    CfnOutput
 )
 
 from constructs import Construct
+import os
 
 
 class AlbPathBasedSessionStickinessStack(Stack):
@@ -77,13 +79,11 @@ class AlbPathBasedSessionStickinessStack(Stack):
                 "alb_path_based_session_stickiness/lambda_functions/generate_cookie"
             ),
             handler="index.lambda_handler",
-            # vpc=vpc,
-            # vpc_subnets=ec2.SubnetSelection(
-            #     subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-            # ),
-            # allow_public_subnet=False,
             layers=[requests_layer],
             tracing=lambda_.Tracing.ACTIVE,
+            environment={
+                "PATH_REGEX": r"LifeProcess/([0-9a-f]+)@",
+            },
         )
 
         lambda_tg = elbv2.ApplicationTargetGroup(
@@ -134,7 +134,7 @@ class AlbPathBasedSessionStickinessStack(Stack):
             vpc_subnets=ec2.SubnetSelection(
                 subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
             ),
-            min_capacity=2,
+            min_capacity=1,
             max_capacity=4,
             ssm_session_permissions=True,
             user_data=web_user_data,
@@ -157,21 +157,28 @@ class AlbPathBasedSessionStickinessStack(Stack):
             port=80,
             target_type=elbv2.TargetType.INSTANCE,
             stickiness_cookie_duration=Duration.hours(8),
+            stickiness_cookie_name="PATH_COOKIE",
+            targets=[web_asg],
         )
-
-        web_asg.attach_to_application_target_group(web_tg)
 
         # Add HTTP listener to the ALB
         listener = alb.add_listener(
             "HTTP",
             port=80,
             open=True,
-            default_action=elbv2.ListenerAction.forward(
+        )
+
+        listener.node.default_child.preserve_host_header=True
+
+        listener.add_action(
+            #Default Action
+            "Lambda",
+            action=elbv2.ListenerAction.forward(
                 [lambda_tg],
             ),
         )
 
-        listener.add_action(
+        web_svr_action = listener.add_action(
             "WebServer",
             priority=1,
             action=elbv2.ListenerAction.forward(
@@ -179,7 +186,32 @@ class AlbPathBasedSessionStickinessStack(Stack):
             ),
             conditions=[
                 elbv2.ListenerCondition.http_header(
-                    name="Cookie", values=["AWSALBAPP=*"]
+                    name="Cookie", values=["PATH_COOKIE=*"]
                 )
             ],
+        )
+
+        favicon_action = listener.add_action(
+            "Favicon",
+            priority=2,
+            action=elbv2.ListenerAction.fixed_response(
+                status_code=204,
+                message_body="",
+            ),
+            conditions=[
+                elbv2.ListenerCondition.path_patterns(
+                    values=["/favicon.ico"]
+                )
+            ],
+        )
+
+        CfnOutput(
+            self,
+            "ALB_URL",
+            value=alb.load_balancer_dns_name,
+        )
+        CfnOutput(
+            self,
+            "Test_URL",
+            value=f"http://{alb.load_balancer_dns_name}/test/0123456789abcdef",
         )

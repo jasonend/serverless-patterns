@@ -2,73 +2,98 @@ import json
 import re
 import requests
 import datetime
+import os
+import logging
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
 def lambda_handler(event, context):
-    """
-    Lambda function handler to generate and set a cookie based on the requested path.
-    This function also proxies the request to the target URL.
+    logger.info(f"Received event: {json.dumps(event)}")
+    
+    if event.get('path') == '/favicon.ico':
+        logger.info("Favicon request received, returning 204 No Content")
+        return {
+            'statusCode': 204,
+            'body': ''
+        }
 
-    :param event: AWS Lambda uses this parameter to pass in event data to the handler.
-    :param context: AWS Lambda uses this parameter to provide runtime information to your handler.
-    :return: The response from the proxied request, including the Set-Cookie header.
-    """
-    print(event)
-    # Return 200 for ELB health checks
-    if event.get('headers', {}).get('user-agent') == 'ELB-HealthChecker/2.0':
-        return {'statusCode': 200}
     try:
-        # Extract the request path
         path = event.get('path', '')
+        logger.info(f"Processing path: {path}")
+        
+        try: 
+            cookie_value = re.search(os.environ['PATH_REGEX'], path).group(1)
+        except AttributeError:
+            logger.warning(f"Regex match not found in path: {path}")
+            cookie_value = path
 
-        # Construct the target URL for the proxied request
+        logger.info(f"Extracted cookie value: {cookie_value}")
+
         headers = event.get('multiValueHeaders', {})
-        url = f"{headers.get('x-forwarded-proto')[0]}://{headers.get('host')[0]}{path}"
+        url = f"{headers.get('x-forwarded-proto', ['https'])[0]}://{headers.get('host')[0]}{path}"
+        logger.info(f"Constructed URL: {url}")
         
-        # Create cookie with the path
-        cookie = f'AWSALBAPP={path}'
+        # Create cookie with the regex match
+        custom_cookie = f'PATH_COOKIE={cookie_value}'
         
-        # Prepare headers for the proxied request, including the cookie and tracing ID
         proxy_headers = {
-            'Cookie': cookie,
-            'X-Amzn-Trace-Id': headers.get('x-amzn-trace-id')[0]
+            'Cookie': custom_cookie,
         }
         
-        # Extract method and body from the original request for proxying
         method = event.get('httpMethod', 'GET')
         body = event.get('body', '')
-        print(f"{method}, {body}, {url}")
-        try:
-            response = requests.request(method, url, headers=proxy_headers, data=body, timeout=1)
-            response.raise_for_status()  # This will raise an exception for 4xx and 5xx status codes
-            
-            # Prepare the response
-            response_headers = dict(response.headers)
-            expiration = (datetime.datetime.now() + datetime.timedelta(minutes=30)).strftime('%a, %d %b %Y %H:%M:%S GMT')
-            if headers.get('x-forwarded-proto')[0] == 'https':
-                response_headers['Set-Cookie'] = f'{cookie}; Secure; SameSite=None; Expires={expiration};'
-            else:
-                response_headers['Set-Cookie'] = f'{cookie}; SameSite=None; Expires={expiration};'
 
-            
-            return {
-                'statusCode': response.status_code,
-                'headers': response_headers,
-                'body': response.text
-            }
-        except requests.exceptions.Timeout:
-            return {
-                'statusCode': 200,
-                'headers': {'Content-Type': 'application/json'},
-                'body': json.dumps({'message': 'The endpoint did not respond within 1 second.'})
-            }
-        except requests.exceptions.RequestException as e:
-            # Handle other request exceptions
-            return {
-                'statusCode': 500,
-                'headers': {'Content-Type': 'application/json'},
-                'body': json.dumps({'error': f'Request failed: {str(e)}'})
-            }
-    except Exception as e:
+        logger.info(f"Sending request to EC2: Method: {method}, URL: {url}, Headers: {proxy_headers}")
+        response = requests.request(method, url, headers=proxy_headers, data=body, timeout=1)
+        logger.info(f"Received response from EC2: Status: {response.status_code}, Headers: {dict(response.headers)}")
+
+        # Prepare the response
+        multi_value_headers = {}
+        for key, value in response.headers.items():
+            if key.lower() == 'set-cookie':
+                # If there are multiple Set-Cookie headers, ensure they're all included
+                if 'Set-Cookie' in multi_value_headers:
+                    multi_value_headers['Set-Cookie'].append(value)
+                else:
+                    multi_value_headers['Set-Cookie'] = [value]
+            else:
+                # For non-Set-Cookie headers, always use a list
+                multi_value_headers[key] = [value]
+
+        # Add your custom cookie
+        expiration = (datetime.datetime.now() + datetime.timedelta(minutes=30)).strftime('%a, %d %b %Y %H:%M:%S GMT')
+        custom_cookie_with_attributes = f'{custom_cookie}; Expires={expiration}; Path={path}'
+        if 'Set-Cookie' in multi_value_headers:
+            multi_value_headers['Set-Cookie'].append(custom_cookie_with_attributes)
+        else:
+            multi_value_headers['Set-Cookie'] = [custom_cookie_with_attributes]
+
+        logger.info(f"Preparing Lambda response: Status: {response.status_code}, Headers: {multi_value_headers}")
         return {
-            'statusCode': 400,
+            'statusCode': response.status_code,
+            'multiValueHeaders': multi_value_headers,
+            'body': response.text
+        }
+
+    except requests.exceptions.Timeout:
+        logger.error("Request to EC2 timed out")
+        return {
+            'statusCode': 504,
+            'multiValueHeaders': {'Content-Type': ['application/json']},
+            'body': json.dumps({'message': 'The endpoint did not respond within 1 second.'})
+        }
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request to EC2 failed: {str(e)}")
+        return {
+            'statusCode': 502,
+            'multiValueHeaders': {'Content-Type': ['application/json']},
+            'body': json.dumps({'error': f'Request failed: {str(e)}'})
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
+        return {
+            'statusCode': 500,
+            'multiValueHeaders': {'Content-Type': ['application/json']},
             'body': json.dumps({'error': str(e)})
         }
